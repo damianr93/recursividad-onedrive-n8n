@@ -307,29 +307,36 @@ export class FileController {
 
         this.textExtractionService.validateExtractionResult(extractionResult);
 
-        res.json({
-          json: {
-            pageContent: extractionResult.pageContent,
-            id: metadata.id,
-            name: metadata.name,
-            size: metadata.size,
-            webUrl: metadata.webUrl,
-            metadata: {
-              fileName: metadata.name,
-              fileId: metadata.id,
-              fileSize: metadata.size,
-              fileType: extractionResult.fileType,
-              source: 'onedrive',
+        const base64Data = buffer.toString('base64');
+        
+        const response = [
+          {
+            json: {
+              pageContent: extractionResult.pageContent,
+              id: metadata.id,
+              name: metadata.name,
+              size: metadata.size,
               webUrl: metadata.webUrl,
-              processedDate: new Date().toISOString(),
+              metadata: {
+                fileName: metadata.name,
+                fileId: metadata.id,
+                fileSize: metadata.size,
+                fileType: extractionResult.fileType,
+                source: 'onedrive',
+                webUrl: metadata.webUrl,
+                processedDate: new Date().toISOString(),
+              },
+            },
+            binary: {
+              data: base64Data,
+              mimeType: mimeType,
+              fileName: metadata.name,
             },
           },
-          binary: {
-            data: buffer.toString('base64'),
-            mimeType: mimeType,
-            fileName: metadata.name,
-          },
-        });
+        ];
+
+        res.setHeader('Content-Type', 'application/json');
+        res.json(response);
       } catch (extractionError) {
         const errorMessage = extractionError instanceof Error ? extractionError.message : 'Error desconocido al extraer texto';
         
