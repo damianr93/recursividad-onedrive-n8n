@@ -307,7 +307,7 @@ export class FileController {
 
         this.textExtractionService.validateExtractionResult(extractionResult);
 
-        const base64Data = buffer.toString('base64');
+        const base64Data = String(buffer.toString('base64'));
         
         const response = [
           {
