@@ -307,7 +307,25 @@ export class FileController {
 
         this.textExtractionService.validateExtractionResult(extractionResult);
 
-        const base64Data = String(buffer.toString('base64'));
+        const isExcel = 
+          mimeType.toLowerCase().includes('spreadsheetml') ||
+          metadata.name.toLowerCase().endsWith('.xlsx') ||
+          metadata.name.toLowerCase().endsWith('.xls');
+
+        let binaryData: string;
+        let binaryMimeType: string;
+        let binaryFileName: string;
+
+        if (isExcel) {
+          const textBuffer = Buffer.from(extractionResult.pageContent, 'utf-8');
+          binaryData = String(textBuffer.toString('base64'));
+          binaryMimeType = 'text/plain';
+          binaryFileName = metadata.name.replace(/\.(xlsx|xls)$/i, '.txt');
+        } else {
+          binaryData = String(buffer.toString('base64'));
+          binaryMimeType = mimeType;
+          binaryFileName = metadata.name;
+        }
         
         const response = [
           {
@@ -329,9 +347,9 @@ export class FileController {
             },
             binary: {
               data: {
-                data: base64Data,
-                mimeType: mimeType,
-                fileName: metadata.name,
+                data: binaryData,
+                mimeType: binaryMimeType,
+                fileName: binaryFileName,
               },
             },
           },

@@ -58,10 +58,25 @@ export class TextExtractionService {
 
   private async extractFromPdf(buffer: Buffer): Promise<ExtractionResult> {
     try {
-      const data = await (pdfParse as any)(buffer);
-      const text = data.text.trim();
+      const options = {
+        max: 0,
+        version: 'v1.10.100',
+      };
+      
+      const data = await (pdfParse as any)(buffer, options);
+      let text = data.text || '';
+      
+      if (typeof text !== 'string') {
+        text = String(text);
+      }
+      
+      text = text.trim();
 
       if (!text || text.length === 0) {
+        const numPages = data.numpages || 0;
+        if (numPages > 0) {
+          throw new Error('PDF sin texto extraíble (posiblemente escaneado o solo imágenes)');
+        }
         throw new Error('PDF sin texto extraíble (posiblemente escaneado o solo imágenes)');
       }
 
@@ -74,6 +89,7 @@ export class TextExtractionService {
       if (errorMessage.includes('sin texto extraíble')) {
         throw error;
       }
+      console.error('Error detallado al extraer PDF:', errorMessage);
       throw new Error(`Error al extraer texto del PDF: ${errorMessage}`);
     }
   }
@@ -81,10 +97,31 @@ export class TextExtractionService {
   private async extractFromDocx(buffer: Buffer): Promise<ExtractionResult> {
     try {
       const result = await mammoth.extractRawText({ buffer });
-      const text = result.value.trim();
+      let text = result.value || '';
+      
+      if (typeof text !== 'string') {
+        text = String(text);
+      }
+      
+      text = text.trim();
 
       if (!text || text.length === 0) {
-        throw new Error('Documento Word sin texto extraíble');
+        try {
+          const htmlResult = await mammoth.convertToHtml({ buffer });
+          const htmlText = htmlResult.value || '';
+          if (htmlText && htmlText.trim().length > 0) {
+            text = htmlText
+              .replace(/<[^>]*>/g, ' ')
+              .replace(/\s+/g, ' ')
+              .trim();
+          }
+        } catch (htmlError) {
+          console.error('Error al intentar extraer HTML del DOCX:', htmlError);
+        }
+        
+        if (!text || text.length === 0) {
+          throw new Error('Documento Word sin texto extraíble');
+        }
       }
 
       return {
@@ -96,6 +133,7 @@ export class TextExtractionService {
       if (errorMessage.includes('sin texto extraíble')) {
         throw error;
       }
+      console.error('Error detallado al extraer DOCX:', errorMessage);
       throw new Error(`Error al extraer texto del documento Word: ${errorMessage}`);
     }
   }
