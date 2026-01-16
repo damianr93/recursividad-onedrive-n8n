@@ -1,6 +1,7 @@
 import * as pdfParse from 'pdf-parse';
 import mammoth from 'mammoth';
 import ExcelJS from 'exceljs';
+import { fileTypeFromBuffer } from 'file-type';
 
 export interface ExtractionResult {
   pageContent: string;
@@ -17,39 +18,51 @@ export interface ExtractionError {
 export class TextExtractionService {
   async extractText(buffer: Buffer, mimeType: string, fileName: string): Promise<ExtractionResult> {
     const normalizedMimeType = mimeType.toLowerCase();
+    const normalizedFileName = fileName.toLowerCase();
+    const detected = await this.detectFileType(buffer);
+    const combinedMimeType = `${normalizedMimeType} ${detected.mimeType}`.trim();
+    const combinedFileName = `${normalizedFileName}${detected.extensionSuffix}`;
+    const isPdf = combinedMimeType.includes('pdf') || combinedFileName.endsWith('.pdf');
+    const isDoc =
+      combinedMimeType.includes('wordprocessingml') ||
+      combinedMimeType.includes('msword') ||
+      combinedFileName.endsWith('.docx') ||
+      combinedFileName.endsWith('.docm') ||
+      combinedFileName.endsWith('.dotx') ||
+      combinedFileName.endsWith('.dotm') ||
+      combinedFileName.endsWith('.doc');
+    const isExcel =
+      combinedMimeType.includes('spreadsheetml') ||
+      combinedFileName.endsWith('.xlsx') ||
+      combinedFileName.endsWith('.xls');
+    const isImage =
+      combinedMimeType.includes('image') ||
+      combinedFileName.match(/\.(jpg|jpeg|png|gif|bmp|webp|svg)$/i);
+    const isPlainText =
+      combinedMimeType.includes('text') ||
+      combinedFileName.match(/\.(txt|md|json|csv)$/i);
 
-    if (normalizedMimeType.includes('pdf')) {
+    if (isPdf) {
       return this.extractFromPdf(buffer);
     }
 
-    if (
-      normalizedMimeType.includes('wordprocessingml') ||
-      normalizedMimeType.includes('msword') ||
-      fileName.toLowerCase().endsWith('.docx') ||
-      fileName.toLowerCase().endsWith('.doc')
-    ) {
+    if (isDoc) {
       return this.extractFromDocx(buffer);
     }
 
-    if (
-      normalizedMimeType.includes('spreadsheetml') ||
-      fileName.toLowerCase().endsWith('.xlsx') ||
-      fileName.toLowerCase().endsWith('.xls')
-    ) {
+    if (isExcel) {
       return this.extractFromExcel(buffer);
     }
 
-    if (
-      normalizedMimeType.includes('image') ||
-      fileName.match(/\.(jpg|jpeg|png|gif|bmp|webp|svg)$/i)
-    ) {
+    if (isImage) {
       throw new Error('Archivo de imagen no vectorizable sin OCR');
     }
 
-    if (
-      normalizedMimeType.includes('text') ||
-      fileName.match(/\.(txt|md|json|csv)$/i)
-    ) {
+    if (isPlainText) {
+      return this.extractFromText(buffer);
+    }
+
+    if (this.looksLikePlainText(buffer)) {
       return this.extractFromText(buffer);
     }
 
@@ -72,6 +85,14 @@ export class TextExtractionService {
       text = this.normalizeText(text);
 
       if (!this.hasValidText(text)) {
+        const fallbackText = await this.extractPdfTextWithPagerender(buffer);
+        if (this.hasValidText(fallbackText)) {
+          return {
+            pageContent: fallbackText,
+            fileType: 'pdf',
+          };
+        }
+
         const numPages = data.numpages || 0;
         console.warn(`PDF con ${numPages} páginas pero sin texto extraíble. Texto crudo: "${text.substring(0, 100)}"`);
         throw new Error('PDF sin texto extraíble (posiblemente escaneado o solo imágenes)');
@@ -216,8 +237,10 @@ export class TextExtractionService {
     }
     
     return text
+      .replace(/\u0000/g, '')
       .replace(/\r\n/g, '\n')
       .replace(/\r/g, '\n')
+      .replace(/[^\S\n]+/g, ' ')
       .replace(/\n{3,}/g, '\n\n')
       .trim();
   }
@@ -232,14 +255,72 @@ export class TextExtractionService {
       return false;
     }
     
-    const nonWhitespaceChars = trimmed.replace(/\s/g, '').length;
-    
-    return nonWhitespaceChars >= 3;
+    const meaningfulChars = trimmed.match(/[\p{L}\p{N}]/gu);
+    return (meaningfulChars?.length || 0) >= 3;
   }
 
   validateExtractionResult(result: ExtractionResult): void {
     if (!result.pageContent || !this.hasValidText(result.pageContent)) {
       throw new Error('No se pudo extraer texto del archivo');
+    }
+  }
+
+  private async detectFileType(buffer: Buffer): Promise<{ mimeType: string; extensionSuffix: string }> {
+    try {
+      const detected = await fileTypeFromBuffer(buffer);
+      if (!detected) {
+        return { mimeType: '', extensionSuffix: '' };
+      }
+
+      return {
+        mimeType: detected.mime.toLowerCase(),
+        extensionSuffix: detected.ext ? `.${detected.ext.toLowerCase()}` : '',
+      };
+    } catch {
+      return { mimeType: '', extensionSuffix: '' };
+    }
+  }
+
+  private looksLikePlainText(buffer: Buffer): boolean {
+    const sampleSize = Math.min(buffer.length, 4096);
+    if (sampleSize === 0) {
+      return false;
+    }
+
+    const sample = buffer.subarray(0, sampleSize);
+    const text = sample.toString('utf-8');
+    if (!text) {
+      return false;
+    }
+
+    const nullChars = (text.match(/\u0000/g) || []).length;
+    if (nullChars > 0) {
+      return false;
+    }
+
+    const printable = (text.match(/[\t\n\r\x20-\x7E\u00A0-\u00FF]/g) || []).length;
+    const ratio = printable / text.length;
+    return ratio >= 0.8;
+  }
+
+  private async extractPdfTextWithPagerender(buffer: Buffer): Promise<string> {
+    try {
+      const pagerender = async (pageData: any): Promise<string> => {
+        const textContent = await pageData.getTextContent({
+          normalizeWhitespace: true,
+          disableCombineTextItems: false,
+        });
+
+        return textContent.items.map((item: any) => item.str).join(' ');
+      };
+
+      const data = await (pdfParse as any)(buffer, { pagerender });
+      const text = typeof data.text === 'string' ? data.text : String(data.text || '');
+      return this.normalizeText(text);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
+      console.warn('Fallback PDF pagerender falló:', errorMessage);
+      return '';
     }
   }
 }
