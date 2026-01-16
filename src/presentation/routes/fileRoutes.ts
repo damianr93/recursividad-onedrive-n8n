@@ -24,6 +24,16 @@ export function createFileRoutes(fileController: FileController): Router {
     });
   });
 
+  router.post('/set-token', (req, res) => {
+    fileController.setToken(req, res).catch((error) => {
+      console.error('Error no manejado en setToken:', error);
+      res.status(500).json({
+        error: 'Error interno del servidor',
+        message: error instanceof Error ? error.message : 'Error desconocido',
+      });
+    });
+  });
+
   router.get('/health', (req, res) => {
     fileController.healthCheck(req, res);
   });

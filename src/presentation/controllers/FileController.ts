@@ -1,5 +1,6 @@
 import type { Request, Response } from 'express';
 import type { GetFilesRecursivelyUseCase } from '../../application/use-cases/GetFilesRecursivelyUseCase.js';
+import { TokenStorage } from '../../infrastructure/auth/TokenStorage.js';
 
 export class FileController {
   constructor(private readonly getFilesRecursivelyUseCase: GetFilesRecursivelyUseCase) {}
@@ -21,7 +22,11 @@ export class FileController {
         }
       }
 
-      const accessToken = bodyAccessToken || headerAccessToken;
+      let accessToken = bodyAccessToken || headerAccessToken;
+      
+      if (!accessToken) {
+        accessToken = TokenStorage.getToken();
+      }
 
       let folderId = rawFolderId;
       if (typeof folderId === 'string' && folderId.includes("'")) {
@@ -85,11 +90,37 @@ export class FileController {
     }
   }
 
+  async setToken(req: Request, res: Response): Promise<void> {
+    try {
+      const { token, expiresIn } = req.body;
+
+      if (!token) {
+        res.status(400).json({ error: 'token es requerido' });
+        return;
+      }
+
+      TokenStorage.setToken(token, expiresIn);
+      res.json({
+        success: true,
+        message: 'Token almacenado correctamente',
+        hasToken: TokenStorage.hasToken(),
+      });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
+      console.error('Error en setToken:', errorMessage);
+      res.status(500).json({
+        error: 'Error al almacenar token',
+        message: errorMessage,
+      });
+    }
+  }
+
   healthCheck(_req: Request, res: Response): void {
     res.json({
       status: 'ok',
       message: 'Servidor funcionando correctamente',
       timestamp: new Date().toISOString(),
+      hasStoredToken: TokenStorage.hasToken(),
     });
   }
 }

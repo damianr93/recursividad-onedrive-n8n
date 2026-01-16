@@ -27,5 +27,6 @@ app.listen(PORT, () => {
   console.log(`🚀 Servidor corriendo en http://localhost:${PORT}`);
   console.log(`📁 Endpoint: POST http://localhost:${PORT}/get-files`);
   console.log(`📁 Endpoint alternativo: POST http://localhost:${PORT}/get-files-header`);
+  console.log(`🔑 Almacenar token: POST http://localhost:${PORT}/set-token`);
   console.log(`❤️  Health check: GET http://localhost:${PORT}/health`);
 });
