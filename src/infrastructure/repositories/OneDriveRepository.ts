@@ -32,12 +32,7 @@ export class OneDriveRepository implements IOneDriveRepository {
         siteId: item.parentReference.siteId,
       },
       fileSystemInfo: item.fileSystemInfo,
-      file: item.file
-        ? {
-            mimeType: item.file.mimeType,
-            hashes: item.file.hashes,
-          }
-        : undefined,
+      hashes: item.file?.hashes,
     };
   }
 

@@ -35,13 +35,10 @@ export interface File {
     createdDateTime: string;
     lastModifiedDateTime: string;
   };
-  file?: {
-    mimeType: string;
-    hashes?: {
-      quickXorHash?: string;
-      sha1Hash?: string;
-      sha256Hash?: string;
-    };
+  hashes?: {
+    quickXorHash?: string;
+    sha1Hash?: string;
+    sha256Hash?: string;
   };
 }
 
