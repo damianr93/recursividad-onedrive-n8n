@@ -18,6 +18,13 @@ export class FileController {
         }
       }
 
+      console.log('=== DEBUG TOKEN ===');
+      console.log('Headers completos:', JSON.stringify(req.headers, null, 2));
+      console.log('Body completo:', JSON.stringify(req.body, null, 2));
+      console.log('authHeader:', authHeader);
+      console.log('bodyAccessToken presente:', !!bodyAccessToken);
+      console.log('headerAccessToken presente:', !!headerAccessToken);
+      
       const accessToken = bodyAccessToken || headerAccessToken;
 
       let folderId = rawFolderId;
