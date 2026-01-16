@@ -4,7 +4,7 @@ import type { FileService } from '../../domain/services/FileService.js';
 export class GetFilesRecursivelyUseCase {
   constructor(private readonly fileService: FileService) {}
 
-  async execute(folderId: string, accessToken: string, userId?: string): Promise<Array<{ json: File }>> {
+  async execute(folderId: string, accessToken: string, userId?: string): Promise<File[]> {
     if (!folderId || folderId.trim() === '') {
       throw new Error('folderId es requerido y no puede estar vacío');
     }
@@ -14,6 +14,6 @@ export class GetFilesRecursivelyUseCase {
     }
 
     const files = await this.fileService.getFilesRecursively(folderId, accessToken, userId);
-    return files.map((file) => ({ json: file }));
+    return files;
   }
 }
