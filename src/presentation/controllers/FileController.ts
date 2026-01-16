@@ -35,25 +35,8 @@ export class FileController {
       }
 
       if (!accessToken) {
-        console.log('Headers recibidos:', Object.keys(req.headers));
-        console.log('Body recibido:', JSON.stringify(req.body));
         res.status(400).json({ 
-          error: 'accessToken es requerido. Puede pasarlo en el body o en el header Authorization (Bearer token)',
-          debug: {
-            hasAuthHeader: !!authHeader,
-            hasBodyToken: !!bodyAccessToken,
-            headers: Object.keys(req.headers)
-          }
-        });
-        return;
-      }
-
-      if (!accessToken.includes('.')) {
-        console.error('Token recibido no parece ser un JWT válido. Longitud:', accessToken.length);
-        console.error('Primeros 50 caracteres:', accessToken.substring(0, 50));
-        res.status(400).json({
-          error: 'El accessToken no es válido. Asegúrate de que n8n esté enviando el token correctamente en el header Authorization',
-          hint: 'El token debe ser un JWT válido con puntos (.). Verifica que la autenticación OAuth2 esté configurada correctamente en n8n.'
+          error: 'accessToken es requerido. Puede pasarlo en el body o en el header Authorization (Bearer token)'
         });
         return;
       }
