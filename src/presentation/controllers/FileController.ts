@@ -41,6 +41,10 @@ export class FileController {
         return;
       }
 
+      console.log('Token recibido - Longitud:', accessToken.length);
+      console.log('Token recibido - Primeros 50 chars:', accessToken.substring(0, 50));
+      console.log('Token recibido - Tiene puntos:', accessToken.includes('.'));
+
       const result = await this.getFilesRecursivelyUseCase.execute(folderId, accessToken, userId);
       res.json(result);
     } catch (error) {
