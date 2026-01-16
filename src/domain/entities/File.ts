@@ -7,10 +7,33 @@ export interface File {
   downloadUrl: string | null;
   createdDateTime: string;
   lastModifiedDateTime: string;
+  eTag?: string;
+  cTag?: string;
+  createdBy?: {
+    user: {
+      email?: string;
+      id?: string;
+      displayName?: string;
+    };
+  };
+  lastModifiedBy?: {
+    user: {
+      email?: string;
+      id?: string;
+      displayName?: string;
+    };
+  };
   parentReference: {
     id: string;
     name: string | null;
     path: string | null;
+    driveType?: string;
+    driveId?: string;
+    siteId?: string;
+  };
+  fileSystemInfo?: {
+    createdDateTime: string;
+    lastModifiedDateTime: string;
   };
   file?: {
     mimeType: string;
@@ -36,8 +59,15 @@ export interface Folder {
 export interface OneDriveItem {
   id: string;
   name: string;
+  eTag?: string;
+  cTag?: string;
   folder?: {
     childCount?: number;
+    view?: {
+      sortBy?: string;
+      sortOrder?: string;
+      viewType?: string;
+    };
   };
   file?: {
     mimeType: string;
@@ -52,9 +82,30 @@ export interface OneDriveItem {
   '@microsoft.graph.downloadUrl'?: string;
   createdDateTime: string;
   lastModifiedDateTime: string;
+  createdBy?: {
+    user: {
+      email?: string;
+      id?: string;
+      displayName?: string;
+    };
+  };
+  lastModifiedBy?: {
+    user: {
+      email?: string;
+      id?: string;
+      displayName?: string;
+    };
+  };
   parentReference: {
     id: string;
     name?: string;
     path?: string;
+    driveType?: string;
+    driveId?: string;
+    siteId?: string;
+  };
+  fileSystemInfo?: {
+    createdDateTime: string;
+    lastModifiedDateTime: string;
   };
 }

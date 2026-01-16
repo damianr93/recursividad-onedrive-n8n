@@ -19,11 +19,19 @@ export class OneDriveRepository implements IOneDriveRepository {
       downloadUrl: item['@microsoft.graph.downloadUrl'] || null,
       createdDateTime: item.createdDateTime,
       lastModifiedDateTime: item.lastModifiedDateTime,
+      eTag: item.eTag,
+      cTag: item.cTag,
+      createdBy: item.createdBy,
+      lastModifiedBy: item.lastModifiedBy,
       parentReference: {
         id: item.parentReference.id,
         name: item.parentReference.name || null,
         path: item.parentReference.path || null,
+        driveType: item.parentReference.driveType,
+        driveId: item.parentReference.driveId,
+        siteId: item.parentReference.siteId,
       },
+      fileSystemInfo: item.fileSystemInfo,
       file: item.file
         ? {
             mimeType: item.file.mimeType,
