@@ -33,12 +33,8 @@ export class MicrosoftGraphClient {
 
     while (nextLink) {
       try {
-        const url = nextLink.startsWith('http') ? nextLink : nextLink;
+        const url = nextLink.startsWith('http') ? nextLink : `${this.baseUrl}${nextLink}`;
         const authHeader = `Bearer ${accessToken.trim()}`;
-        
-        console.log('Llamando a Microsoft Graph:', url);
-        console.log('Token usado - Longitud:', accessToken.trim().length);
-        console.log('Token usado - Primeros 50 chars:', accessToken.trim().substring(0, 50));
         
         const response: { data: MicrosoftGraphResponse } = await this.client.get<MicrosoftGraphResponse>(
           url,
@@ -58,17 +54,9 @@ export class MicrosoftGraphClient {
           const errorMessage = errorData?.error?.message || error.message;
           const errorCode = errorData?.error?.code;
           
-          console.error('Error de Microsoft Graph:', {
-            code: errorCode,
-            message: errorMessage,
-            status: error.response?.status,
-            url: nextLink
-          });
-          
           if (errorCode === 'InvalidAuthenticationToken' || errorMessage.includes('JWT')) {
             throw new Error(
               `Error de autenticación: El token proporcionado no es válido para Microsoft Graph API. ` +
-              `Asegúrate de que el token sea un JWT válido obtenido desde n8n usando el nodo Microsoft OAuth2. ` +
               `Detalles: ${errorMessage}`
             );
           }

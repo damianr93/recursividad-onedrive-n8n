@@ -1,13 +1,18 @@
 import type { Request, Response } from 'express';
 import type { GetFilesRecursivelyUseCase } from '../../application/use-cases/GetFilesRecursivelyUseCase.js';
 import { TokenStorage } from '../../infrastructure/auth/TokenStorage.js';
+import type { OAuth2Service } from '../../infrastructure/auth/OAuth2Service.js';
 
 export class FileController {
-  constructor(private readonly getFilesRecursivelyUseCase: GetFilesRecursivelyUseCase) {}
+  constructor(
+    private readonly getFilesRecursivelyUseCase: GetFilesRecursivelyUseCase,
+    private readonly oauth2Service?: OAuth2Service
+  ) {}
 
   async getFiles(req: Request, res: Response): Promise<void> {
     try {
-      const { folderId: rawFolderId, accessToken: bodyAccessToken, userId } = req.body;
+      const body = req.body || {};
+      const { folderId: rawFolderId, accessToken: bodyAccessToken, userId } = body;
       
       let headerAccessToken: string | undefined;
       const authHeader = req.headers.authorization;
@@ -26,6 +31,19 @@ export class FileController {
       
       if (!accessToken) {
         accessToken = TokenStorage.getToken();
+        
+        if (!accessToken && this.oauth2Service && TokenStorage.hasRefreshToken()) {
+          try {
+            const refreshToken = TokenStorage.getRefreshToken();
+            if (refreshToken) {
+              await this.oauth2Service.refreshAccessToken(refreshToken);
+              accessToken = TokenStorage.getToken();
+            }
+          } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
+            console.error('Error al renovar token:', errorMessage);
+          }
+        }
       }
 
       let folderId = rawFolderId;
@@ -38,14 +56,19 @@ export class FileController {
       folderId = folderId?.trim();
 
       if (!folderId) {
-        res.status(400).json({ error: 'folderId es requerido' });
+        folderId = process.env.ONEDRIVE_ROOT_FOLDER_ID?.trim();
+      }
+
+      if (!folderId) {
+        res.status(400).json({ 
+          error: 'folderId es requerido. Puede pasarlo en el body o configurarlo en ONEDRIVE_ROOT_FOLDER_ID en .env'
+        });
         return;
       }
 
       if (!accessToken || accessToken === 'Bearer') {
-        res.status(400).json({ 
-          error: 'accessToken es requerido. Si usas n8n con "Predefined Credential Type", asegúrate de que la autenticación esté correctamente configurada. ' +
-            'Si pasas el token manualmente, debe estar en el body como "accessToken" o en el header Authorization como "Bearer <token>".'
+        res.status(401).json({ 
+          error: 'accessToken es requerido. Autentica primero usando GET /auth/login o pasa el token en el body/header.'
         });
         return;
       }
@@ -55,7 +78,10 @@ export class FileController {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
       console.error('Error en getFiles:', errorMessage);
-      res.status(500).json({
+      
+      const statusCode = errorMessage.includes('autenticación') || errorMessage.includes('token') ? 401 : 500;
+      
+      res.status(statusCode).json({
         error: 'Error al obtener archivos',
         message: errorMessage,
       });
@@ -64,17 +90,24 @@ export class FileController {
 
   async getFilesWithHeader(req: Request, res: Response): Promise<void> {
     try {
-      const { folderId, userId } = req.body;
+      const body = req.body || {};
+      let { folderId, userId } = body;
       const authHeader = req.headers.authorization;
       const accessToken = authHeader?.replace('Bearer ', '');
 
       if (!folderId) {
-        res.status(400).json({ error: 'folderId es requerido' });
+        folderId = process.env.ONEDRIVE_ROOT_FOLDER_ID?.trim();
+      }
+
+      if (!folderId) {
+        res.status(400).json({ 
+          error: 'folderId es requerido. Puede pasarlo en el body o configurarlo en ONEDRIVE_ROOT_FOLDER_ID en .env'
+        });
         return;
       }
 
       if (!accessToken) {
-        res.status(400).json({ error: 'accessToken es requerido en el header Authorization' });
+        res.status(401).json({ error: 'accessToken es requerido en el header Authorization' });
         return;
       }
 
@@ -83,7 +116,10 @@ export class FileController {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
       console.error('Error en getFilesWithHeader:', errorMessage);
-      res.status(500).json({
+      
+      const statusCode = errorMessage.includes('autenticación') || errorMessage.includes('token') ? 401 : 500;
+      
+      res.status(statusCode).json({
         error: 'Error al obtener archivos',
         message: errorMessage,
       });
@@ -92,14 +128,31 @@ export class FileController {
 
   async setToken(req: Request, res: Response): Promise<void> {
     try {
-      const { token, expiresIn } = req.body;
+      const body = req.body || {};
+      const { token, expiresIn } = body;
+      const authHeader = req.headers.authorization;
 
-      if (!token) {
-        res.status(400).json({ error: 'token es requerido' });
+      let tokenToStore: string | undefined = token;
+
+      if (!tokenToStore && authHeader) {
+        if (authHeader.startsWith('Bearer ')) {
+          const tokenPart = authHeader.replace('Bearer ', '').trim();
+          if (tokenPart && tokenPart !== 'Bearer' && tokenPart.length > 10) {
+            tokenToStore = tokenPart;
+          }
+        } else if (authHeader !== 'Bearer' && authHeader.length > 10) {
+          tokenToStore = authHeader.trim();
+        }
+      }
+
+      if (!tokenToStore) {
+        res.status(400).json({ 
+          error: 'token es requerido. Puede pasarlo en el body como "token" o en el header Authorization (Bearer token)'
+        });
         return;
       }
 
-      TokenStorage.setToken(token, expiresIn);
+      TokenStorage.setToken(tokenToStore, expiresIn);
       res.json({
         success: true,
         message: 'Token almacenado correctamente',
@@ -115,12 +168,83 @@ export class FileController {
     }
   }
 
+  async oauth2Callback(req: Request, res: Response): Promise<void> {
+    try {
+      const { code, error, error_description } = req.query;
+
+      if (error) {
+        res.status(400).json({
+          error: 'Error en autenticación OAuth2',
+          message: error_description || error,
+        });
+        return;
+      }
+
+      if (!code || typeof code !== 'string') {
+        res.status(400).json({ error: 'Código de autorización no recibido' });
+        return;
+      }
+
+      if (!this.oauth2Service) {
+        res.status(500).json({ error: 'OAuth2 no configurado' });
+        return;
+      }
+
+      await this.oauth2Service.exchangeCodeForToken(code);
+
+      res.send(`
+        <html>
+          <head><title>Autenticación exitosa</title></head>
+          <body style="font-family: Arial; text-align: center; padding: 50px;">
+            <h1>✅ Autenticación exitosa</h1>
+            <p>La aplicación se ha conectado correctamente con Microsoft Graph.</p>
+            <p>Puedes cerrar esta ventana y usar la API normalmente.</p>
+            <p><a href="/health">Verificar estado</a></p>
+          </body>
+        </html>
+      `);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
+      console.error('Error en oauth2Callback:', errorMessage);
+      res.status(500).send(`
+        <html>
+          <head><title>Error de autenticación</title></head>
+          <body style="font-family: Arial; text-align: center; padding: 50px;">
+            <h1>❌ Error de autenticación</h1>
+            <p>${errorMessage}</p>
+            <p><a href="/auth/login">Intentar de nuevo</a></p>
+          </body>
+        </html>
+      `);
+    }
+  }
+
+  async oauth2Login(_req: Request, res: Response): Promise<void> {
+    try {
+      if (!this.oauth2Service) {
+        res.status(500).json({ error: 'OAuth2 no configurado. Verifica las variables de entorno.' });
+        return;
+      }
+
+      const authUrl = this.oauth2Service.getAuthorizationUrl();
+      res.redirect(authUrl);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
+      console.error('Error en oauth2Login:', errorMessage);
+      res.status(500).json({
+        error: 'Error al generar URL de autenticación',
+        message: errorMessage,
+      });
+    }
+  }
+
   healthCheck(_req: Request, res: Response): void {
     res.json({
       status: 'ok',
       message: 'Servidor funcionando correctamente',
       timestamp: new Date().toISOString(),
       hasStoredToken: TokenStorage.hasToken(),
+      hasRefreshToken: TokenStorage.hasRefreshToken(),
     });
   }
 }

@@ -34,6 +34,30 @@ export function createFileRoutes(fileController: FileController): Router {
     });
   });
 
+  router.get('/auth/login', (req, res) => {
+    fileController.oauth2Login(req, res).catch((error: unknown) => {
+      console.error('Error no manejado en oauth2Login:', error);
+      res.status(500).json({
+        error: 'Error interno del servidor',
+        message: error instanceof Error ? error.message : 'Error desconocido',
+      });
+    });
+  });
+
+  router.get('/auth/callback', (req, res) => {
+    fileController.oauth2Callback(req, res).catch((error: unknown) => {
+      console.error('Error no manejado en oauth2Callback:', error);
+      res.status(500).send(`
+        <html>
+          <body style="font-family: Arial; text-align: center; padding: 50px;">
+            <h1>Error</h1>
+            <p>${error instanceof Error ? error.message : 'Error desconocido'}</p>
+          </body>
+        </html>
+      `);
+    });
+  });
+
   router.get('/health', (req, res) => {
     fileController.healthCheck(req, res);
   });
