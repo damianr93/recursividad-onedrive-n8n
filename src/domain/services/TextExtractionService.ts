@@ -60,7 +60,6 @@ export class TextExtractionService {
     try {
       const options = {
         max: 0,
-        version: 'v1.10.100',
       };
       
       const data = await (pdfParse as any)(buffer, options);
@@ -70,13 +69,11 @@ export class TextExtractionService {
         text = String(text);
       }
       
-      text = text.trim();
+      text = this.normalizeText(text);
 
-      if (!text || text.length === 0) {
+      if (!this.hasValidText(text)) {
         const numPages = data.numpages || 0;
-        if (numPages > 0) {
-          throw new Error('PDF sin texto extraíble (posiblemente escaneado o solo imágenes)');
-        }
+        console.warn(`PDF con ${numPages} páginas pero sin texto extraíble. Texto crudo: "${text.substring(0, 100)}"`);
         throw new Error('PDF sin texto extraíble (posiblemente escaneado o solo imágenes)');
       }
 
@@ -95,47 +92,46 @@ export class TextExtractionService {
   }
 
   private async extractFromDocx(buffer: Buffer): Promise<ExtractionResult> {
+    let text = '';
+    
     try {
       const result = await mammoth.extractRawText({ buffer });
-      let text = result.value || '';
+      text = result.value || '';
       
       if (typeof text !== 'string') {
         text = String(text);
       }
       
-      text = text.trim();
-
-      if (!text || text.length === 0) {
-        try {
-          const htmlResult = await mammoth.convertToHtml({ buffer });
-          const htmlText = htmlResult.value || '';
-          if (htmlText && htmlText.trim().length > 0) {
-            text = htmlText
-              .replace(/<[^>]*>/g, ' ')
-              .replace(/\s+/g, ' ')
-              .trim();
-          }
-        } catch (htmlError) {
-          console.error('Error al intentar extraer HTML del DOCX:', htmlError);
-        }
-        
-        if (!text || text.length === 0) {
-          throw new Error('Documento Word sin texto extraíble');
-        }
-      }
-
-      return {
-        pageContent: text,
-        fileType: 'docx',
-      };
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
-      if (errorMessage.includes('sin texto extraíble')) {
-        throw error;
-      }
-      console.error('Error detallado al extraer DOCX:', errorMessage);
-      throw new Error(`Error al extraer texto del documento Word: ${errorMessage}`);
+      text = this.normalizeText(text);
+    } catch (rawTextError) {
+      console.warn('Error al extraer texto raw del DOCX, intentando HTML:', rawTextError);
     }
+
+    if (!this.hasValidText(text)) {
+      try {
+        const htmlResult = await mammoth.convertToHtml({ buffer });
+        const htmlText = htmlResult.value || '';
+        if (htmlText) {
+          text = htmlText
+            .replace(/<[^>]*>/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+          text = this.normalizeText(text);
+        }
+      } catch (htmlError) {
+        console.warn('Error al intentar extraer HTML del DOCX:', htmlError);
+      }
+    }
+    
+    if (!this.hasValidText(text)) {
+      console.warn(`DOCX sin texto extraíble. Texto crudo: "${text.substring(0, 100)}"`);
+      throw new Error('Documento Word sin texto extraíble');
+    }
+
+    return {
+      pageContent: text,
+      fileType: 'docx',
+    };
   }
 
   private async extractFromExcel(buffer: Buffer): Promise<ExtractionResult> {
@@ -174,9 +170,11 @@ export class TextExtractionService {
         });
       });
 
-      const text = textParts.join('\n').trim();
+      let text = textParts.join('\n');
+      text = this.normalizeText(text);
 
-      if (!text || text.length === 0) {
+      if (!this.hasValidText(text)) {
+        console.warn(`Excel sin contenido extraíble. Texto crudo: "${text.substring(0, 100)}"`);
         throw new Error('Archivo Excel sin contenido extraíble (hojas vacías o solo formato)');
       }
 
@@ -195,9 +193,10 @@ export class TextExtractionService {
 
   private async extractFromText(buffer: Buffer): Promise<ExtractionResult> {
     try {
-      const text = buffer.toString('utf-8').trim();
+      let text = buffer.toString('utf-8');
+      text = this.normalizeText(text);
 
-      if (!text || text.length === 0) {
+      if (!this.hasValidText(text)) {
         throw new Error('Archivo de texto vacío');
       }
 
@@ -211,8 +210,35 @@ export class TextExtractionService {
     }
   }
 
+  private normalizeText(text: string): string {
+    if (!text || typeof text !== 'string') {
+      return '';
+    }
+    
+    return text
+      .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+
+  private hasValidText(text: string): boolean {
+    if (!text || typeof text !== 'string') {
+      return false;
+    }
+    
+    const trimmed = text.trim();
+    if (trimmed.length === 0) {
+      return false;
+    }
+    
+    const nonWhitespaceChars = trimmed.replace(/\s/g, '').length;
+    
+    return nonWhitespaceChars >= 3;
+  }
+
   validateExtractionResult(result: ExtractionResult): void {
-    if (!result.pageContent || result.pageContent.trim().length === 0) {
+    if (!result.pageContent || !this.hasValidText(result.pageContent)) {
       throw new Error('No se pudo extraer texto del archivo');
     }
   }
