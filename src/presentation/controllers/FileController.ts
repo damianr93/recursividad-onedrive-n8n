@@ -6,11 +6,28 @@ export class FileController {
 
   async getFiles(req: Request, res: Response): Promise<void> {
     try {
-      const { folderId, accessToken: bodyAccessToken, userId } = req.body;
+      const { folderId: rawFolderId, accessToken: bodyAccessToken, userId } = req.body;
       const authHeader = req.headers.authorization;
-      const headerAccessToken = authHeader?.replace('Bearer ', '');
+      
+      let headerAccessToken: string | undefined;
+      if (authHeader) {
+        if (authHeader.startsWith('Bearer ')) {
+          headerAccessToken = authHeader.replace('Bearer ', '').trim();
+        } else {
+          headerAccessToken = authHeader.trim();
+        }
+      }
 
       const accessToken = bodyAccessToken || headerAccessToken;
+
+      let folderId = rawFolderId;
+      if (typeof folderId === 'string' && folderId.includes("'")) {
+        const match = folderId.match(/'([^']+)'/);
+        if (match) {
+          folderId = match[1];
+        }
+      }
+      folderId = folderId?.trim();
 
       if (!folderId) {
         res.status(400).json({ error: 'folderId es requerido' });
@@ -20,6 +37,14 @@ export class FileController {
       if (!accessToken) {
         res.status(400).json({ 
           error: 'accessToken es requerido. Puede pasarlo en el body o en el header Authorization (Bearer token)' 
+        });
+        return;
+      }
+
+      if (!accessToken.includes('.')) {
+        console.error('Token recibido no parece ser un JWT válido:', accessToken.substring(0, 20) + '...');
+        res.status(400).json({
+          error: 'El accessToken no es válido. Asegúrate de que n8n esté enviando el token correctamente en el header Authorization',
         });
         return;
       }
