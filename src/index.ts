@@ -46,6 +46,7 @@ app.listen(PORT, () => {
   console.log(`🚀 Servidor corriendo en http://localhost:${PORT}`);
   console.log(`📁 Endpoint: POST http://localhost:${PORT}/get-files`);
   console.log(`📁 Endpoint alternativo: POST http://localhost:${PORT}/get-files-header`);
+  console.log(`📄 Extraer texto: POST http://localhost:${PORT}/extract-text`);
   console.log(`🔑 Almacenar token: POST http://localhost:${PORT}/set-token`);
   if (oauth2Service) {
     console.log(`🔐 Autenticación OAuth2: GET http://localhost:${PORT}/auth/login`);

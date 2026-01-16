@@ -2,12 +2,20 @@ import type { Request, Response } from 'express';
 import type { GetFilesRecursivelyUseCase } from '../../application/use-cases/GetFilesRecursivelyUseCase.js';
 import { TokenStorage } from '../../infrastructure/auth/TokenStorage.js';
 import type { OAuth2Service } from '../../infrastructure/auth/OAuth2Service.js';
+import { MicrosoftGraphClient } from '../../infrastructure/clients/MicrosoftGraphClient.js';
+import { TextExtractionService } from '../../domain/services/TextExtractionService.js';
 
 export class FileController {
+  private readonly graphClient: MicrosoftGraphClient;
+  private readonly textExtractionService: TextExtractionService;
+
   constructor(
     private readonly getFilesRecursivelyUseCase: GetFilesRecursivelyUseCase,
     private readonly oauth2Service?: OAuth2Service
-  ) {}
+  ) {
+    this.graphClient = new MicrosoftGraphClient();
+    this.textExtractionService = new TextExtractionService();
+  }
 
   async getFiles(req: Request, res: Response): Promise<void> {
     try {
@@ -233,6 +241,116 @@ export class FileController {
       console.error('Error en oauth2Login:', errorMessage);
       res.status(500).json({
         error: 'Error al generar URL de autenticación',
+        message: errorMessage,
+      });
+    }
+  }
+
+  async extractText(req: Request, res: Response): Promise<void> {
+    try {
+      const body = req.body || {};
+      const { fileId, accessToken: bodyAccessToken, userId } = body;
+
+      let headerAccessToken: string | undefined;
+      const authHeader = req.headers.authorization;
+      if (authHeader) {
+        if (authHeader.startsWith('Bearer ')) {
+          const tokenPart = authHeader.replace('Bearer ', '').trim();
+          if (tokenPart && tokenPart !== 'Bearer' && tokenPart.length > 10) {
+            headerAccessToken = tokenPart;
+          }
+        } else if (authHeader !== 'Bearer' && authHeader.length > 10) {
+          headerAccessToken = authHeader.trim();
+        }
+      }
+
+      let accessToken = bodyAccessToken || headerAccessToken;
+
+      if (!accessToken) {
+        accessToken = TokenStorage.getToken();
+
+        if (!accessToken && this.oauth2Service && TokenStorage.hasRefreshToken()) {
+          try {
+            const refreshToken = TokenStorage.getRefreshToken();
+            if (refreshToken) {
+              await this.oauth2Service.refreshAccessToken(refreshToken);
+              accessToken = TokenStorage.getToken();
+            }
+          } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
+            console.error('Error al renovar token:', errorMessage);
+          }
+        }
+      }
+
+      if (!fileId) {
+        res.status(400).json({ error: 'fileId es requerido' });
+        return;
+      }
+
+      if (!accessToken || accessToken === 'Bearer') {
+        res.status(401).json({ 
+          error: 'accessToken es requerido. Autentica primero usando GET /auth/login o pasa el token en el body/header.'
+        });
+        return;
+      }
+
+      const metadata = await this.graphClient.getFileMetadata(fileId, accessToken, userId);
+      const { buffer, mimeType } = await this.graphClient.downloadFile(fileId, accessToken, userId);
+
+      try {
+        const extractionResult = await this.textExtractionService.extractText(
+          buffer,
+          mimeType,
+          metadata.name
+        );
+
+        this.textExtractionService.validateExtractionResult(extractionResult);
+
+        res.json({
+          json: {
+            pageContent: extractionResult.pageContent,
+            id: metadata.id,
+            name: metadata.name,
+            size: metadata.size,
+            webUrl: metadata.webUrl,
+            metadata: {
+              fileName: metadata.name,
+              fileId: metadata.id,
+              fileSize: metadata.size,
+              fileType: extractionResult.fileType,
+              source: 'onedrive',
+              webUrl: metadata.webUrl,
+              processedDate: new Date().toISOString(),
+            },
+          },
+          binary: {
+            data: buffer.toString('base64'),
+            mimeType: mimeType,
+            fileName: metadata.name,
+          },
+        });
+      } catch (extractionError) {
+        const errorMessage = extractionError instanceof Error ? extractionError.message : 'Error desconocido al extraer texto';
+        
+        const errorResponse = {
+          error: 'Archivo no vectorizable',
+          id: metadata.id,
+          name: metadata.name,
+          path: metadata.parentReference.path,
+          status: errorMessage,
+        };
+
+        res.status(422).json(errorResponse);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
+      console.error('Error en extractText:', errorMessage);
+
+      const statusCode = errorMessage.includes('autenticación') || errorMessage.includes('token') ? 401 : 500;
+
+      res.status(statusCode).json({
+        error: 'Error al procesar archivo',
         message: errorMessage,
       });
     }
