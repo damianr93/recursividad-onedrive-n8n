@@ -37,11 +37,10 @@ export class FileController {
         return;
       }
 
-      if (!accessToken || accessToken === 'Bearer' || accessToken.length < 10) {
+      if (!accessToken || accessToken === 'Bearer') {
         res.status(400).json({ 
-          error: 'accessToken es requerido y debe ser válido. Puede pasarlo en el body o en el header Authorization (Bearer token). ' +
-            'Si usas n8n, asegúrate de que el header Authorization incluya el token completo, no solo "Bearer". ' +
-            'Ejemplo: Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGc...'
+          error: 'accessToken es requerido. Si usas n8n con "Predefined Credential Type", asegúrate de que la autenticación esté correctamente configurada. ' +
+            'Si pasas el token manualmente, debe estar en el body como "accessToken" o en el header Authorization como "Bearer <token>".'
         });
         return;
       }
