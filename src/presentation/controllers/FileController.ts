@@ -6,7 +6,11 @@ export class FileController {
 
   async getFiles(req: Request, res: Response): Promise<void> {
     try {
-      const { folderId, accessToken, userId } = req.body;
+      const { folderId, accessToken: bodyAccessToken, userId } = req.body;
+      const authHeader = req.headers.authorization;
+      const headerAccessToken = authHeader?.replace('Bearer ', '');
+
+      const accessToken = bodyAccessToken || headerAccessToken;
 
       if (!folderId) {
         res.status(400).json({ error: 'folderId es requerido' });
@@ -14,7 +18,9 @@ export class FileController {
       }
 
       if (!accessToken) {
-        res.status(400).json({ error: 'accessToken es requerido' });
+        res.status(400).json({ 
+          error: 'accessToken es requerido. Puede pasarlo en el body o en el header Authorization (Bearer token)' 
+        });
         return;
       }
 
