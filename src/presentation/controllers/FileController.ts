@@ -12,19 +12,15 @@ export class FileController {
       const authHeader = req.headers.authorization;
       if (authHeader) {
         if (authHeader.startsWith('Bearer ')) {
-          headerAccessToken = authHeader.replace('Bearer ', '').trim();
-        } else {
+          const tokenPart = authHeader.replace('Bearer ', '').trim();
+          if (tokenPart && tokenPart !== 'Bearer' && tokenPart.length > 10) {
+            headerAccessToken = tokenPart;
+          }
+        } else if (authHeader !== 'Bearer' && authHeader.length > 10) {
           headerAccessToken = authHeader.trim();
         }
       }
 
-      console.log('=== DEBUG TOKEN ===');
-      console.log('Headers completos:', JSON.stringify(req.headers, null, 2));
-      console.log('Body completo:', JSON.stringify(req.body, null, 2));
-      console.log('authHeader:', authHeader);
-      console.log('bodyAccessToken presente:', !!bodyAccessToken);
-      console.log('headerAccessToken presente:', !!headerAccessToken);
-      
       const accessToken = bodyAccessToken || headerAccessToken;
 
       let folderId = rawFolderId;
@@ -41,16 +37,14 @@ export class FileController {
         return;
       }
 
-      if (!accessToken) {
+      if (!accessToken || accessToken === 'Bearer' || accessToken.length < 10) {
         res.status(400).json({ 
-          error: 'accessToken es requerido. Puede pasarlo en el body o en el header Authorization (Bearer token)'
+          error: 'accessToken es requerido y debe ser válido. Puede pasarlo en el body o en el header Authorization (Bearer token). ' +
+            'Si usas n8n, asegúrate de que el header Authorization incluya el token completo, no solo "Bearer". ' +
+            'Ejemplo: Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGc...'
         });
         return;
       }
-
-      console.log('Token recibido - Longitud:', accessToken.length);
-      console.log('Token recibido - Primeros 50 chars:', accessToken.substring(0, 50));
-      console.log('Token recibido - Tiene puntos:', accessToken.includes('.'));
 
       const result = await this.getFilesRecursivelyUseCase.execute(folderId, accessToken, userId);
       res.json(result);
