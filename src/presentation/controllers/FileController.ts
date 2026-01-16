@@ -328,9 +328,11 @@ export class FileController {
               },
             },
             binary: {
-              data: base64Data,
-              mimeType: mimeType,
-              fileName: metadata.name,
+              data: {
+                data: base64Data,
+                mimeType: mimeType,
+                fileName: metadata.name,
+              },
             },
           },
         ];
