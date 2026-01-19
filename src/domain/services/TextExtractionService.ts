@@ -2,6 +2,7 @@ import { PDFParse } from 'pdf-parse';
 import mammoth from 'mammoth';
 import ExcelJS from 'exceljs';
 import { fileTypeFromBuffer } from 'file-type';
+import { getTextExtractor } from 'office-text-extractor';
 
 export interface ExtractionResult {
   pageContent: string;
@@ -26,6 +27,7 @@ export class TextExtractionService {
     const isDoc =
       combinedMimeType.includes('wordprocessingml') ||
       combinedMimeType.includes('msword') ||
+      combinedMimeType.includes('x-cfb') ||
       combinedFileName.endsWith('.docx') ||
       combinedFileName.endsWith('.docm') ||
       combinedFileName.endsWith('.dotx') ||
@@ -124,7 +126,9 @@ export class TextExtractionService {
 
   private async extractFromDocx(buffer: Buffer): Promise<ExtractionResult> {
     let text = '';
+    let isDocx = true;
     
+    // Método 1: Intentar con mammoth (solo funciona con .docx)
     try {
       const result = await mammoth.extractRawText({ buffer });
       text = result.value || '';
@@ -135,10 +139,46 @@ export class TextExtractionService {
       
       text = this.normalizeText(text);
     } catch (rawTextError) {
-      // Intentando método HTML alternativo
+      // Si mammoth falla, puede ser un .doc antiguo
+      isDocx = false;
     }
 
+    // Método 2: Si mammoth falló, intentar con office-text-extractor
+    // Primero intentar como .docx, luego como .doc
     if (!this.hasAnyText(text)) {
+      try {
+        const extractor = getTextExtractor();
+        // Intentar primero como .docx
+        try {
+          const extractedText = await extractor.extractText({ 
+            input: buffer, 
+            type: 'buffer' 
+          });
+          if (extractedText && typeof extractedText === 'string') {
+            text = extractedText;
+            text = this.normalizeText(text);
+          }
+        } catch (docxError) {
+          // Si falla, puede ser un .doc antiguo - office-text-extractor no lo soporta bien
+          // En este caso, lanzar un error más descriptivo
+          throw new Error('Archivo .doc antiguo no soportado. Por favor, convierte el archivo a .docx');
+        }
+      } catch (extractorError) {
+        const errorMsg = extractorError instanceof Error ? extractorError.message : 'Error desconocido';
+        // Si el error indica que no hay método para el tipo, es un .doc antiguo
+        if (errorMsg.includes('could not find a method') || errorMsg.includes('x-cfb')) {
+          throw new Error('Archivo .doc antiguo no soportado. Por favor, convierte el archivo a .docx');
+        }
+        // Si el error ya fue lanzado (docxError), propagarlo
+        if (extractorError instanceof Error && extractorError.message.includes('no soportado')) {
+          throw extractorError;
+        }
+        // Continuar con método 3 solo si no es un error de formato no soportado
+      }
+    }
+
+    // Método 3: Si aún no hay texto, intentar HTML con mammoth (solo para .docx)
+    if (!this.hasAnyText(text) && isDocx) {
       try {
         const htmlResult = await mammoth.convertToHtml({ buffer });
         const htmlText = htmlResult.value || '';
@@ -160,7 +200,7 @@ export class TextExtractionService {
 
     return {
       pageContent: text,
-      fileType: 'docx',
+      fileType: isDocx ? 'docx' : 'doc',
     };
   }
 
