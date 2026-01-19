@@ -271,22 +271,47 @@ export class TextExtractionService {
     }
     
     // Filtrar metadata de paginación común en PDFs escaneados
-    // Patrones como "-- 1 of 1 --", "-- Page 1 --", etc.
-    const paginationPattern = /^[\s\n\r]*--?\s*\d+\s+(of|page|página)\s+\d+\s*--?[\s\n\r]*$/i;
-    if (paginationPattern.test(trimmed)) {
+    // Patrones como "-- 1 of 1 --", "-- Page 1 --", etc. (una sola instancia)
+    const singlePaginationPattern = /^[\s\n\r]*--?\s*\d+\s+(of|page|página)\s+\d+\s*--?[\s\n\r]*$/i;
+    if (singlePaginationPattern.test(trimmed)) {
       return false;
     }
     
+    // Detectar múltiples patrones de paginación (PDFs escaneados con solo metadata)
+    // Buscar si el texto consiste principalmente en patrones "-- X of Y --"
+    const paginationMatches = trimmed.match(/--?\s*\d+\s+(of|page|página)\s+\d+\s*--?/gi);
+    if (paginationMatches) {
+      // Si más del 80% del texto es metadata de paginación, rechazar
+      const paginationText = paginationMatches.join('');
+      const paginationRatio = paginationText.length / trimmed.length;
+      if (paginationRatio > 0.8) {
+        return false;
+      }
+      
+      // Si hay muchas instancias de paginación pero poco otro contenido, rechazar
+      // Ejemplo: "-- 1 of 13 --" repetido 13 veces sin otro contenido
+      const nonPaginationText = trimmed.replace(/--?\s*\d+\s+(of|page|página)\s+\d+\s*--?/gi, '').trim();
+      if (nonPaginationText.length < 20) {
+        return false;
+      }
+    }
+    
     // Requerir una cantidad mínima de caracteres alfanuméricos significativos
-    // Para evitar aceptar solo símbolos, espacios o metadata mínima
     const alphanumericChars = trimmed.match(/[a-zA-Z0-9\u00C0-\u024F\u1E00-\u1EFF]/g);
     if (!alphanumericChars || alphanumericChars.length < 10) {
       return false;
     }
     
-    // Verificar que hay palabras reales (no solo números o símbolos)
+    // Verificar que hay palabras reales diversas (no solo "of" repetido)
     const words = trimmed.match(/[a-zA-Z\u00C0-\u024F\u1E00-\u1EFF]{2,}/g);
     if (!words || words.length < 3) {
+      return false;
+    }
+    
+    // Verificar diversidad de palabras: si todas las palabras son iguales o muy similares, rechazar
+    const uniqueWords = new Set(words.map(w => w.toLowerCase()));
+    if (uniqueWords.size < 3) {
+      // Si hay menos de 3 palabras únicas, probablemente es solo metadata repetida
       return false;
     }
     
