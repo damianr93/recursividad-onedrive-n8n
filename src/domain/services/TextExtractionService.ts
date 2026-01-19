@@ -280,6 +280,8 @@ export class TextExtractionService {
     // Detectar múltiples patrones de paginación (PDFs escaneados con solo metadata)
     // Buscar si el texto consiste principalmente en patrones "-- X of Y --"
     const paginationMatches = trimmed.match(/--?\s*\d+\s+(of|page|página)\s+\d+\s*--?/gi);
+    let nonPaginationText = trimmed;
+    
     if (paginationMatches) {
       // Si más del 80% del texto es metadata de paginación, rechazar
       const paginationText = paginationMatches.join('');
@@ -288,22 +290,37 @@ export class TextExtractionService {
         return false;
       }
       
+      // Remover paginación para analizar el contenido real
+      nonPaginationText = trimmed.replace(/--?\s*\d+\s+(of|page|página)\s+\d+\s*--?/gi, '').trim();
+      
       // Si hay muchas instancias de paginación pero poco otro contenido, rechazar
       // Ejemplo: "-- 1 of 13 --" repetido 13 veces sin otro contenido
-      const nonPaginationText = trimmed.replace(/--?\s*\d+\s+(of|page|página)\s+\d+\s*--?/gi, '').trim();
       if (nonPaginationText.length < 20) {
         return false;
       }
     }
     
-    // Requerir una cantidad mínima de caracteres alfanuméricos significativos
-    const alphanumericChars = trimmed.match(/[a-zA-Z0-9\u00C0-\u024F\u1E00-\u1EFF]/g);
+    // Si hay suficiente contenido sin paginación (más de 500 caracteres), es válido
+    // Esto cubre casos donde el texto puede tener caracteres especiales o codificaciones diferentes
+    // que no se reconocen bien como palabras pero sí como contenido
+    if (nonPaginationText.length >= 500) {
+      return true;
+    }
+    
+    // Para textos más cortos, verificar caracteres alfanuméricos y palabras
+    const alphanumericChars = nonPaginationText.match(/[a-zA-Z0-9\u00C0-\u024F\u1E00-\u1EFF]/g);
     if (!alphanumericChars || alphanumericChars.length < 10) {
       return false;
     }
     
-    // Verificar que hay palabras reales diversas (no solo "of" repetido)
-    const words = trimmed.match(/[a-zA-Z\u00C0-\u024F\u1E00-\u1EFF]{2,}/g);
+    // Si hay al menos 100 caracteres sin paginación y algunos caracteres alfanuméricos, es válido
+    // Esto permite PDFs con caracteres especiales que no se reconocen como palabras normales
+    if (nonPaginationText.length >= 100 && alphanumericChars.length >= 20) {
+      return true;
+    }
+    
+    // Para textos más cortos, verificar que hay palabras reales diversas
+    const words = nonPaginationText.match(/[a-zA-Z\u00C0-\u024F\u1E00-\u1EFF]{2,}/g);
     if (!words || words.length < 3) {
       return false;
     }
@@ -311,7 +328,7 @@ export class TextExtractionService {
     // Verificar diversidad de palabras: si todas las palabras son iguales o muy similares, rechazar
     const uniqueWords = new Set(words.map(w => w.toLowerCase()));
     if (uniqueWords.size < 3) {
-      // Si hay menos de 3 palabras únicas, probablemente es solo metadata repetida
+      // Si hay menos de 3 palabras únicas Y el texto es corto, probablemente es solo metadata repetida
       return false;
     }
     
