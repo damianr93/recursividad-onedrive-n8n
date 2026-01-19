@@ -3,7 +3,7 @@ import type { IOneDriveRepository } from '../repositories/IOneDriveRepository.js
 
 export class FileService {
   private fileCount = 0;
-  private readonly logInterval = 20;
+  private readonly logInterval = 200;
 
   constructor(private readonly oneDriveRepository: IOneDriveRepository) {}
 

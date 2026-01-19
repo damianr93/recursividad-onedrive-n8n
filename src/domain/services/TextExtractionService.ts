@@ -86,7 +86,7 @@ export class TextExtractionService {
       
       text = this.normalizeText(text);
     } catch (error) {
-      console.warn('Error en extracción básica de PDF, intentando método alternativo:', error);
+      // Intentando método alternativo
     }
 
     if (!this.hasAnyText(text)) {
@@ -96,7 +96,7 @@ export class TextExtractionService {
           text = fallbackText;
         }
       } catch (fallbackError) {
-        console.warn('Método alternativo de PDF falló:', fallbackError);
+        // Método alternativo falló
       }
     }
 
@@ -123,7 +123,7 @@ export class TextExtractionService {
       
       text = this.normalizeText(text);
     } catch (rawTextError) {
-      console.warn('Error al extraer texto raw del DOCX, intentando HTML:', rawTextError);
+      // Intentando método HTML alternativo
     }
 
     if (!this.hasAnyText(text)) {
@@ -138,7 +138,7 @@ export class TextExtractionService {
           text = this.normalizeText(text);
         }
       } catch (htmlError) {
-        console.warn('Error al intentar extraer HTML del DOCX:', htmlError);
+        // Método HTML falló
       }
     }
     
@@ -323,7 +323,6 @@ export class TextExtractionService {
           }
           return '';
         } catch (pageError) {
-          console.warn('Error en pagerender de página:', pageError);
           return '';
         }
       };
@@ -337,8 +336,6 @@ export class TextExtractionService {
       
       return this.normalizeText(text);
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
-      console.warn('Fallback PDF pagerender falló:', errorMessage);
       return '';
     }
   }
