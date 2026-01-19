@@ -1,4 +1,4 @@
-import * as pdfParse from 'pdf-parse';
+import { PDFParse } from 'pdf-parse';
 import mammoth from 'mammoth';
 import ExcelJS from 'exceljs';
 import { fileTypeFromBuffer } from 'file-type';
@@ -72,23 +72,19 @@ export class TextExtractionService {
   private async extractFromPdf(buffer: Buffer): Promise<ExtractionResult> {
     let text = '';
     
+    // Método 1: Extracción estándar con la nueva API de pdf-parse
     try {
-      const options = {
-        max: 0,
-      };
+      const parser = new PDFParse({ data: buffer });
+      const result = await parser.getText();
       
-      const data = await (pdfParse as any)(buffer, options);
-      text = data.text || '';
-      
-      if (typeof text !== 'string') {
-        text = String(text);
+      if (result && result.text) {
+        text = typeof result.text === 'string' ? result.text : String(result.text || '');
       }
-      
-      text = this.normalizeText(text);
     } catch (error) {
-      // Intentando método alternativo
+      // Continuar con métodos alternativos
     }
 
+    // Método 2: Si no hay texto, intentar con opciones diferentes
     if (!this.hasAnyText(text)) {
       try {
         const fallbackText = await this.extractPdfTextWithPagerender(buffer);
@@ -96,10 +92,26 @@ export class TextExtractionService {
           text = fallbackText;
         }
       } catch (fallbackError) {
-        // Método alternativo falló
+        // Continuar con método 3
       }
     }
 
+    // Método 3: Extracción con lineEnforce
+    if (!this.hasAnyText(text)) {
+      try {
+        const pageByPageText = await this.extractPdfPageByPage(buffer);
+        if (this.hasAnyText(pageByPageText)) {
+          text = pageByPageText;
+        }
+      } catch (pageError) {
+        // Continuar
+      }
+    }
+
+    // Normalizar el texto extraído
+    text = this.normalizeText(text);
+
+    // Validación final más flexible
     if (!this.hasAnyText(text)) {
       throw new Error('PDF sin texto extraíble (posiblemente escaneado o solo imágenes)');
     }
@@ -258,8 +270,16 @@ export class TextExtractionService {
       return false;
     }
     
-    const hasAnyPrintableChar = trimmed.match(/[\S]/);
-    return hasAnyPrintableChar !== null && hasAnyPrintableChar.length > 0;
+    // Buscar cualquier carácter imprimible (incluyendo acentos, símbolos, etc.)
+    // No solo ASCII, sino también Unicode
+    const hasAnyPrintableChar = trimmed.match(/[\S\u00A0-\uFFFF]/);
+    if (hasAnyPrintableChar !== null && hasAnyPrintableChar.length > 0) {
+      return true;
+    }
+    
+    // Verificar si hay al menos un carácter alfanumérico o de puntuación
+    const hasAlphanumeric = trimmed.match(/[a-zA-Z0-9\u00C0-\u024F\u1E00-\u1EFF]/);
+    return hasAlphanumeric !== null && hasAlphanumeric.length > 0;
   }
 
   validateExtractionResult(result: ExtractionResult): void {
@@ -308,33 +328,32 @@ export class TextExtractionService {
 
   private async extractPdfTextWithPagerender(buffer: Buffer): Promise<string> {
     try {
-      const pagerender = async (pageData: any): Promise<string> => {
-        try {
-          const textContent = await pageData.getTextContent({
-            normalizeWhitespace: true,
-            disableCombineTextItems: false,
-          });
-
-          if (textContent && textContent.items && Array.isArray(textContent.items)) {
-            return textContent.items
-              .map((item: any) => item.str || '')
-              .filter((str: string) => str && str.trim().length > 0)
-              .join(' ');
-          }
-          return '';
-        } catch (pageError) {
-          return '';
-        }
-      };
-
-      const data = await (pdfParse as any)(buffer, { pagerender });
-      let text = '';
+      const parser = new PDFParse({ data: buffer });
+      const result = await parser.getText({
+        disableNormalization: false,
+      });
       
-      if (data && data.text) {
-        text = typeof data.text === 'string' ? data.text : String(data.text || '');
+      if (result && result.text) {
+        return this.normalizeText(typeof result.text === 'string' ? result.text : String(result.text || ''));
       }
+      return '';
+    } catch (error) {
+      return '';
+    }
+  }
+
+  private async extractPdfPageByPage(buffer: Buffer): Promise<string> {
+    try {
+      const parser = new PDFParse({ data: buffer });
+      const result = await parser.getText({
+        lineEnforce: true,
+        disableNormalization: false,
+      });
       
-      return this.normalizeText(text);
+      if (result && result.text) {
+        return typeof result.text === 'string' ? result.text : String(result.text || '');
+      }
+      return '';
     } catch (error) {
       return '';
     }
