@@ -270,16 +270,27 @@ export class TextExtractionService {
       return false;
     }
     
-    // Buscar cualquier carácter imprimible (incluyendo acentos, símbolos, etc.)
-    // No solo ASCII, sino también Unicode
-    const hasAnyPrintableChar = trimmed.match(/[\S\u00A0-\uFFFF]/);
-    if (hasAnyPrintableChar !== null && hasAnyPrintableChar.length > 0) {
-      return true;
+    // Filtrar metadata de paginación común en PDFs escaneados
+    // Patrones como "-- 1 of 1 --", "-- Page 1 --", etc.
+    const paginationPattern = /^[\s\n\r]*--?\s*\d+\s+(of|page|página)\s+\d+\s*--?[\s\n\r]*$/i;
+    if (paginationPattern.test(trimmed)) {
+      return false;
     }
     
-    // Verificar si hay al menos un carácter alfanumérico o de puntuación
-    const hasAlphanumeric = trimmed.match(/[a-zA-Z0-9\u00C0-\u024F\u1E00-\u1EFF]/);
-    return hasAlphanumeric !== null && hasAlphanumeric.length > 0;
+    // Requerir una cantidad mínima de caracteres alfanuméricos significativos
+    // Para evitar aceptar solo símbolos, espacios o metadata mínima
+    const alphanumericChars = trimmed.match(/[a-zA-Z0-9\u00C0-\u024F\u1E00-\u1EFF]/g);
+    if (!alphanumericChars || alphanumericChars.length < 10) {
+      return false;
+    }
+    
+    // Verificar que hay palabras reales (no solo números o símbolos)
+    const words = trimmed.match(/[a-zA-Z\u00C0-\u024F\u1E00-\u1EFF]{2,}/g);
+    if (!words || words.length < 3) {
+      return false;
+    }
+    
+    return true;
   }
 
   validateExtractionResult(result: ExtractionResult): void {
