@@ -70,46 +70,44 @@ export class TextExtractionService {
   }
 
   private async extractFromPdf(buffer: Buffer): Promise<ExtractionResult> {
+    let text = '';
+    
     try {
       const options = {
         max: 0,
       };
       
       const data = await (pdfParse as any)(buffer, options);
-      let text = data.text || '';
+      text = data.text || '';
       
       if (typeof text !== 'string') {
         text = String(text);
       }
       
       text = this.normalizeText(text);
-
-      if (!this.hasValidText(text)) {
-        const fallbackText = await this.extractPdfTextWithPagerender(buffer);
-        if (this.hasValidText(fallbackText)) {
-          return {
-            pageContent: fallbackText,
-            fileType: 'pdf',
-          };
-        }
-
-        const numPages = data.numpages || 0;
-        console.warn(`PDF con ${numPages} páginas pero sin texto extraíble. Texto crudo: "${text.substring(0, 100)}"`);
-        throw new Error('PDF sin texto extraíble (posiblemente escaneado o solo imágenes)');
-      }
-
-      return {
-        pageContent: text,
-        fileType: 'pdf',
-      };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
-      if (errorMessage.includes('sin texto extraíble')) {
-        throw error;
-      }
-      console.error('Error detallado al extraer PDF:', errorMessage);
-      throw new Error(`Error al extraer texto del PDF: ${errorMessage}`);
+      console.warn('Error en extracción básica de PDF, intentando método alternativo:', error);
     }
+
+    if (!this.hasAnyText(text)) {
+      try {
+        const fallbackText = await this.extractPdfTextWithPagerender(buffer);
+        if (this.hasAnyText(fallbackText)) {
+          text = fallbackText;
+        }
+      } catch (fallbackError) {
+        console.warn('Método alternativo de PDF falló:', fallbackError);
+      }
+    }
+
+    if (!this.hasAnyText(text)) {
+      throw new Error('PDF sin texto extraíble (posiblemente escaneado o solo imágenes)');
+    }
+
+    return {
+      pageContent: text,
+      fileType: 'pdf',
+    };
   }
 
   private async extractFromDocx(buffer: Buffer): Promise<ExtractionResult> {
@@ -128,7 +126,7 @@ export class TextExtractionService {
       console.warn('Error al extraer texto raw del DOCX, intentando HTML:', rawTextError);
     }
 
-    if (!this.hasValidText(text)) {
+    if (!this.hasAnyText(text)) {
       try {
         const htmlResult = await mammoth.convertToHtml({ buffer });
         const htmlText = htmlResult.value || '';
@@ -144,8 +142,7 @@ export class TextExtractionService {
       }
     }
     
-    if (!this.hasValidText(text)) {
-      console.warn(`DOCX sin texto extraíble. Texto crudo: "${text.substring(0, 100)}"`);
+    if (!this.hasAnyText(text)) {
       throw new Error('Documento Word sin texto extraíble');
     }
 
@@ -177,6 +174,13 @@ export class TextExtractionService {
                 cellText = String((cellValue as any).text).trim();
               } else if (cellValue && typeof cellValue === 'object' && 'result' in cellValue) {
                 cellText = String((cellValue as any).result).trim();
+              } else if (cellValue && typeof cellValue === 'object' && 'richText' in cellValue) {
+                const richText = (cellValue as any).richText;
+                if (Array.isArray(richText)) {
+                  cellText = richText.map((rt: any) => rt.text || '').join('').trim();
+                }
+              } else if (cellValue && typeof cellValue === 'object') {
+                cellText = JSON.stringify(cellValue).trim();
               }
               
               if (cellText.length > 0) {
@@ -194,8 +198,7 @@ export class TextExtractionService {
       let text = textParts.join('\n');
       text = this.normalizeText(text);
 
-      if (!this.hasValidText(text)) {
-        console.warn(`Excel sin contenido extraíble. Texto crudo: "${text.substring(0, 100)}"`);
+      if (!this.hasAnyText(text)) {
         throw new Error('Archivo Excel sin contenido extraíble (hojas vacías o solo formato)');
       }
 
@@ -217,7 +220,7 @@ export class TextExtractionService {
       let text = buffer.toString('utf-8');
       text = this.normalizeText(text);
 
-      if (!this.hasValidText(text)) {
+      if (!this.hasAnyText(text)) {
         throw new Error('Archivo de texto vacío');
       }
 
@@ -245,7 +248,7 @@ export class TextExtractionService {
       .trim();
   }
 
-  private hasValidText(text: string): boolean {
+  private hasAnyText(text: string): boolean {
     if (!text || typeof text !== 'string') {
       return false;
     }
@@ -255,12 +258,12 @@ export class TextExtractionService {
       return false;
     }
     
-    const meaningfulChars = trimmed.match(/[\p{L}\p{N}]/gu);
-    return (meaningfulChars?.length || 0) >= 3;
+    const hasAnyPrintableChar = trimmed.match(/[\S]/);
+    return hasAnyPrintableChar !== null && hasAnyPrintableChar.length > 0;
   }
 
   validateExtractionResult(result: ExtractionResult): void {
-    if (!result.pageContent || !this.hasValidText(result.pageContent)) {
+    if (!result.pageContent || !this.hasAnyText(result.pageContent)) {
       throw new Error('No se pudo extraer texto del archivo');
     }
   }
@@ -306,16 +309,32 @@ export class TextExtractionService {
   private async extractPdfTextWithPagerender(buffer: Buffer): Promise<string> {
     try {
       const pagerender = async (pageData: any): Promise<string> => {
-        const textContent = await pageData.getTextContent({
-          normalizeWhitespace: true,
-          disableCombineTextItems: false,
-        });
+        try {
+          const textContent = await pageData.getTextContent({
+            normalizeWhitespace: true,
+            disableCombineTextItems: false,
+          });
 
-        return textContent.items.map((item: any) => item.str).join(' ');
+          if (textContent && textContent.items && Array.isArray(textContent.items)) {
+            return textContent.items
+              .map((item: any) => item.str || '')
+              .filter((str: string) => str && str.trim().length > 0)
+              .join(' ');
+          }
+          return '';
+        } catch (pageError) {
+          console.warn('Error en pagerender de página:', pageError);
+          return '';
+        }
       };
 
       const data = await (pdfParse as any)(buffer, { pagerender });
-      const text = typeof data.text === 'string' ? data.text : String(data.text || '');
+      let text = '';
+      
+      if (data && data.text) {
+        text = typeof data.text === 'string' ? data.text : String(data.text || '');
+      }
+      
       return this.normalizeText(text);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
