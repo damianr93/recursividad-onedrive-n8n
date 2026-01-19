@@ -316,17 +316,22 @@ export class FileController {
           extractionResult.fileType === 'doc' ||
           (metadata.name.toLowerCase().endsWith('.doc') && 
            !mimeType.toLowerCase().includes('wordprocessingml'));
+        
+        // Convertir PDFs grandes (>3MB) a TXT para reducir tamaño
+        const isLargePdf = 
+          extractionResult.fileType === 'pdf' && 
+          buffer.length > 3 * 1024 * 1024; // 3MB en bytes
 
         let binaryData: string;
         let binaryMimeType: string;
         let binaryFileName: string;
 
-        if (isExcel || isOldDoc) {
-          // Convertir Excel y .doc antiguos a TXT
+        if (isExcel || isOldDoc || isLargePdf) {
+          // Convertir Excel, .doc antiguos y PDFs grandes a TXT
           const textBuffer = Buffer.from(extractionResult.pageContent, 'utf-8');
           binaryData = String(textBuffer.toString('base64'));
           binaryMimeType = 'text/plain';
-          binaryFileName = metadata.name.replace(/\.(xlsx|xls|doc)$/i, '.txt');
+          binaryFileName = metadata.name.replace(/\.(xlsx|xls|doc|pdf)$/i, '.txt');
         } else {
           binaryData = String(buffer.toString('base64'));
           binaryMimeType = mimeType;
