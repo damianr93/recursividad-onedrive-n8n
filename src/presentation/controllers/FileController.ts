@@ -307,35 +307,79 @@ export class FileController {
 
         this.textExtractionService.validateExtractionResult(extractionResult);
 
+        // Convertir PDFs, Excel y .doc antiguos a TXT para reducir tamaño
+        // Siempre convertir PDFs a TXT (son más pequeños sin imágenes/formato)
+        const isPdf = extractionResult.fileType === 'pdf';
         const isExcel = 
           mimeType.toLowerCase().includes('spreadsheetml') ||
           metadata.name.toLowerCase().endsWith('.xlsx') ||
           metadata.name.toLowerCase().endsWith('.xls');
-        
         const isOldDoc = 
           extractionResult.fileType === 'doc' ||
           (metadata.name.toLowerCase().endsWith('.doc') && 
            !mimeType.toLowerCase().includes('wordprocessingml'));
-        
-        // Convertir PDFs grandes (>3MB) a TXT para reducir tamaño
-        const isLargePdf = 
-          extractionResult.fileType === 'pdf' && 
-          buffer.length > 3 * 1024 * 1024; // 3MB en bytes
 
         let binaryData: string;
         let binaryMimeType: string;
         let binaryFileName: string;
 
-        if (isExcel || isOldDoc || isLargePdf) {
-          // Convertir Excel, .doc antiguos y PDFs grandes a TXT
-          const textBuffer = Buffer.from(extractionResult.pageContent, 'utf-8');
-          binaryData = String(textBuffer.toString('base64'));
+        if (isExcel || isOldDoc || isPdf) {
+          // Convertir Excel, .doc antiguos y PDFs a TXT
+          let textBuffer = Buffer.from(extractionResult.pageContent, 'utf-8');
+          let base64Data = textBuffer.toString('base64');
+          
+          // Si el texto en base64 excede 2MB, truncarlo
+          const maxBase64Size = 2 * 1024 * 1024; // 2MB en bytes
+          if (base64Data.length > maxBase64Size) {
+            // Calcular cuántos caracteres del texto original necesitamos
+            // Base64 aumenta el tamaño en ~33%, así que necesitamos ~75% del texto original
+            const maxTextSize = Math.floor(maxBase64Size * 0.75);
+            const truncatedText = extractionResult.pageContent.substring(0, maxTextSize);
+            textBuffer = Buffer.from(truncatedText, 'utf-8');
+            base64Data = textBuffer.toString('base64');
+            
+            // Asegurarnos de que no exceda 2MB (por seguridad, truncar base64 directamente si es necesario)
+            if (base64Data.length > maxBase64Size) {
+              base64Data = base64Data.substring(0, maxBase64Size);
+            }
+          }
+          
+          binaryData = String(base64Data);
           binaryMimeType = 'text/plain';
           binaryFileName = metadata.name.replace(/\.(xlsx|xls|doc|pdf)$/i, '.txt');
         } else {
-          binaryData = String(buffer.toString('base64'));
-          binaryMimeType = mimeType;
-          binaryFileName = metadata.name;
+          // Para otros archivos, verificar si el binario excede 2MB
+          const originalBase64 = buffer.toString('base64');
+          if (originalBase64.length > 2 * 1024 * 1024) {
+            // Si el archivo original excede 2MB, intentar convertir a TXT si es posible
+            if (extractionResult.fileType === 'docx') {
+              let textBuffer = Buffer.from(extractionResult.pageContent, 'utf-8');
+              let base64Data = textBuffer.toString('base64');
+              
+              // Truncar si es necesario
+              const maxBase64Size = 2 * 1024 * 1024;
+              if (base64Data.length > maxBase64Size) {
+                const maxTextSize = Math.floor(maxBase64Size * 0.75);
+                const truncatedText = extractionResult.pageContent.substring(0, maxTextSize);
+                textBuffer = Buffer.from(truncatedText, 'utf-8');
+                base64Data = textBuffer.toString('base64');
+                if (base64Data.length > maxBase64Size) {
+                  base64Data = base64Data.substring(0, maxBase64Size);
+                }
+              }
+              
+              binaryData = String(base64Data);
+              binaryMimeType = 'text/plain';
+              binaryFileName = metadata.name.replace(/\.(docx)$/i, '.txt');
+            } else {
+              // Para otros tipos de archivo, devolver error si excede 2MB
+              throw new Error(`El archivo ${metadata.name} excede el límite de 2MB de Pinecone (tamaño: ${(buffer.length / (1024 * 1024)).toFixed(2)}MB)`);
+            }
+          } else {
+            binaryData = String(originalBase64);
+            binaryMimeType = mimeType;
+            binaryFileName = metadata.name;
+          }
         }
         
         const response = [
