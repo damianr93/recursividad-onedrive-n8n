@@ -22,7 +22,7 @@
     "mammoth": "^1.11.0",
     "office-text-extractor": "^4.0.0",
     "pdf-parse": "^2.4.5",
-    "xls": "^0.5.1"
+    "xlsx": "^0.20.3"
   },
   "devDependencies": {
     "@types/express": "^4.17.21",

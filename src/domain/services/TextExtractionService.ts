@@ -3,8 +3,7 @@ import mammoth from 'mammoth';
 import ExcelJS from 'exceljs';
 import { fileTypeFromBuffer } from 'file-type';
 import { getTextExtractor } from 'office-text-extractor';
-// @ts-ignore - xls no tiene tipos
-import XLS from 'xls';
+import * as XLSX from 'xlsx';
 
 export interface ExtractionResult {
   pageContent: string;
@@ -292,12 +291,12 @@ export class TextExtractionService {
 
   private async extractFromOldExcel(buffer: Buffer): Promise<ExtractionResult> {
     try {
-      const workbook = XLS.read(buffer, { type: 'buffer' });
+      const workbook = XLSX.read(buffer, { type: 'buffer' });
       const textParts: string[] = [];
 
       workbook.SheetNames.forEach((sheetName: string) => {
         const sheet = workbook.Sheets[sheetName];
-        const sheetData = XLS.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+        const sheetData = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
         
         sheetData.forEach((row: any) => {
           if (Array.isArray(row)) {
