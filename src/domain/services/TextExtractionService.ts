@@ -3,6 +3,8 @@ import mammoth from 'mammoth';
 import ExcelJS from 'exceljs';
 import { fileTypeFromBuffer } from 'file-type';
 import { getTextExtractor } from 'office-text-extractor';
+// @ts-ignore - xls no tiene tipos
+import XLS from 'xls';
 
 export interface ExtractionResult {
   pageContent: string;
@@ -21,9 +23,19 @@ export class TextExtractionService {
     const normalizedMimeType = mimeType.toLowerCase();
     const normalizedFileName = fileName.toLowerCase();
     const detected = await this.detectFileType(buffer);
-    const combinedMimeType = `${normalizedMimeType} ${detected.mimeType}`.trim();
-    const combinedFileName = `${normalizedFileName}${detected.extensionSuffix}`;
+    const combinedMimeType = `${normalizedMimeType} ${detected.mimeType || ''}`.trim();
+    const combinedFileName = `${normalizedFileName}${detected.extensionSuffix || ''}`;
     const isPdf = combinedMimeType.includes('pdf') || combinedFileName.endsWith('.pdf');
+    // Detectar archivos antiguos primero (antes de los modernos)
+    // .doc antiguo: tiene x-cfb o msword pero NO wordprocessingml, y el nombre original termina en .doc
+    const isOldDoc = normalizedFileName.endsWith('.doc') && 
+                     (combinedMimeType.includes('x-cfb') || 
+                      (combinedMimeType.includes('msword') && !combinedMimeType.includes('wordprocessingml')));
+    
+    // .xls antiguo: el nombre original termina en .xls pero NO tiene spreadsheetml
+    const isOldExcel = normalizedFileName.endsWith('.xls') && 
+                      !combinedMimeType.includes('spreadsheetml');
+    
     const isDoc =
       combinedMimeType.includes('wordprocessingml') ||
       combinedMimeType.includes('msword') ||
@@ -33,8 +45,10 @@ export class TextExtractionService {
       combinedFileName.endsWith('.dotx') ||
       combinedFileName.endsWith('.dotm') ||
       combinedFileName.endsWith('.doc');
+    
     const isExcel =
       combinedMimeType.includes('spreadsheetml') ||
+      combinedMimeType.includes('ms-excel') ||
       combinedFileName.endsWith('.xlsx') ||
       combinedFileName.endsWith('.xls');
     const isImage =
@@ -46,6 +60,15 @@ export class TextExtractionService {
 
     if (isPdf) {
       return this.extractFromPdf(buffer);
+    }
+
+    // Verificar archivos antiguos primero (antes de los modernos)
+    if (isOldDoc) {
+      return this.extractFromOldDoc(buffer);
+    }
+    
+    if (isOldExcel) {
+      return this.extractFromOldExcel(buffer);
     }
 
     if (isDoc) {
@@ -265,6 +288,135 @@ export class TextExtractionService {
       }
       throw new Error(`Error al extraer texto del archivo Excel: ${errorMessage}`);
     }
+  }
+
+  private async extractFromOldExcel(buffer: Buffer): Promise<ExtractionResult> {
+    try {
+      const workbook = XLS.read(buffer, { type: 'buffer' });
+      const textParts: string[] = [];
+
+      workbook.SheetNames.forEach((sheetName: string) => {
+        const sheet = workbook.Sheets[sheetName];
+        const sheetData = XLS.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+        
+        sheetData.forEach((row: any) => {
+          if (Array.isArray(row)) {
+            const rowValues = row
+              .map((cell: any) => {
+                if (cell !== null && cell !== undefined && cell !== '') {
+                  return String(cell).trim();
+                }
+                return '';
+              })
+              .filter((val: string) => val.length > 0);
+            
+            if (rowValues.length > 0) {
+              textParts.push(rowValues.join(' '));
+            }
+          }
+        });
+      });
+
+      let text = textParts.join('\n');
+      text = this.normalizeText(text);
+
+      if (!this.hasAnyText(text)) {
+        throw new Error('Archivo Excel antiguo sin contenido extraíble');
+      }
+
+      return {
+        pageContent: text,
+        fileType: 'xls',
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
+      throw new Error(`Error al extraer texto del archivo Excel antiguo: ${errorMessage}`);
+    }
+  }
+
+  private async extractFromOldDoc(buffer: Buffer): Promise<ExtractionResult> {
+    // Intentar extraer texto de archivos .doc antiguos usando office-text-extractor
+    // Si falla, intentar leer el formato OLE2/CFB directamente (limitado)
+    try {
+      const extractor = getTextExtractor();
+      const extractedText = await extractor.extractText({ input: buffer, type: 'buffer' });
+      
+      if (extractedText && typeof extractedText === 'string' && this.hasAnyText(extractedText)) {
+        return {
+          pageContent: this.normalizeText(extractedText),
+          fileType: 'doc',
+        };
+      }
+    } catch (error) {
+      // office-text-extractor no soporta .doc antiguos
+    }
+    
+    // Si office-text-extractor falla, intentar leer el formato OLE2/CFB básico
+    // Esto es limitado pero puede extraer algo de texto en algunos casos
+    try {
+      const text = await this.extractTextFromOle2Doc(buffer);
+      if (text && this.hasAnyText(text)) {
+        return {
+          pageContent: this.normalizeText(text),
+          fileType: 'doc',
+        };
+      }
+    } catch (oleError) {
+      // Falló la extracción OLE2
+    }
+    
+    throw new Error('No se pudo extraer texto del archivo .doc antiguo. Por favor, convierte el archivo a .docx');
+  }
+
+  private async extractTextFromOle2Doc(buffer: Buffer): Promise<string> {
+    // Extracción básica de texto de archivos .doc antiguos (OLE2/CFB)
+    // Esto es una implementación limitada que busca texto legible en el buffer
+    const textMatches: string[] = [];
+    // Buscar secuencias de texto legible (mínimo 5 caracteres, preferiblemente más)
+    // Excluir caracteres de control y caracteres repetidos sospechosos
+    const textPattern = /[a-zA-Z0-9\u00C0-\u024F\u1E00-\u1EFF][\x20-\x7E\u00A0-\u00FF]{4,}/g;
+    
+    let match;
+    const bufferString = buffer.toString('latin1'); // Usar latin1 para preservar bytes
+    
+    while ((match = textPattern.exec(bufferString)) !== null) {
+      let text = match[0].trim();
+      
+      // Filtrar texto que tiene demasiados caracteres repetidos (probablemente basura)
+      const uniqueChars = new Set(text.split(''));
+      if (uniqueChars.size < text.length * 0.3) {
+        // Si menos del 30% de los caracteres son únicos, probablemente es basura
+        continue;
+      }
+      
+      // Filtrar secuencias de caracteres repetidos (como ÿÿÿÿ)
+      if (/(.)\1{4,}/.test(text)) {
+        continue;
+      }
+      
+      // Aceptar solo si tiene al menos algunos caracteres alfanuméricos
+      if (text.length >= 5 && /[a-zA-Z0-9\u00C0-\u024F]{2,}/.test(text)) {
+        // Limpiar caracteres no imprimibles al inicio/final
+        text = text.replace(/^[\x00-\x1F\x7F-\x9F]+|[\x00-\x1F\x7F-\x9F]+$/g, '');
+        if (text.length >= 5) {
+          textMatches.push(text);
+        }
+      }
+    }
+    
+    // Unir los fragmentos y limpiar
+    let combinedText = textMatches.join(' ');
+    
+    // Limpiar caracteres no imprimibles y espacios excesivos
+    combinedText = combinedText
+      .replace(/[\x00-\x1F\x7F-\x9F]+/g, ' ') // Reemplazar caracteres de control con espacios
+      .replace(/\s+/g, ' ') // Normalizar espacios
+      .trim();
+    
+    // Limpiar fragmentos basura comunes al inicio (como "bjbj,E,E")
+    combinedText = combinedText.replace(/^[a-z]{1,3}[,;:]\s*[A-Z]{1,3}[,;:]\s*/i, '');
+    
+    return combinedText.trim();
   }
 
   private async extractFromText(buffer: Buffer): Promise<ExtractionResult> {

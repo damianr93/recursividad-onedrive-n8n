@@ -311,16 +311,22 @@ export class FileController {
           mimeType.toLowerCase().includes('spreadsheetml') ||
           metadata.name.toLowerCase().endsWith('.xlsx') ||
           metadata.name.toLowerCase().endsWith('.xls');
+        
+        const isOldDoc = 
+          extractionResult.fileType === 'doc' ||
+          (metadata.name.toLowerCase().endsWith('.doc') && 
+           !mimeType.toLowerCase().includes('wordprocessingml'));
 
         let binaryData: string;
         let binaryMimeType: string;
         let binaryFileName: string;
 
-        if (isExcel) {
+        if (isExcel || isOldDoc) {
+          // Convertir Excel y .doc antiguos a TXT
           const textBuffer = Buffer.from(extractionResult.pageContent, 'utf-8');
           binaryData = String(textBuffer.toString('base64'));
           binaryMimeType = 'text/plain';
-          binaryFileName = metadata.name.replace(/\.(xlsx|xls)$/i, '.txt');
+          binaryFileName = metadata.name.replace(/\.(xlsx|xls|doc)$/i, '.txt');
         } else {
           binaryData = String(buffer.toString('base64'));
           binaryMimeType = mimeType;
