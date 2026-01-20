@@ -18,9 +18,35 @@ export interface ExtractionError {
 }
 
 export class TextExtractionService {
+  // Extensiones de archivo soportadas para extracción de texto
+  private readonly supportedExtensions = [
+    '.pdf', '.doc', '.docx', '.docm', '.dotx', '.dotm',
+    '.xls', '.xlsx', '.txt', '.md', '.json', '.csv'
+  ];
+
+  // Extensiones explícitamente no soportadas (rechazar inmediatamente)
+  private readonly unsupportedExtensions = [
+    '.inf', '.exe', '.dll', '.sys', '.bin', '.dat', '.log',
+    '.zip', '.rar', '.7z', '.tar', '.gz',
+    '.mp3', '.mp4', '.avi', '.mov', '.wmv',
+    '.iso', '.img', '.vhd', '.vhdx'
+  ];
+
   async extractText(buffer: Buffer, mimeType: string, fileName: string): Promise<ExtractionResult> {
     const normalizedMimeType = mimeType.toLowerCase();
     const normalizedFileName = fileName.toLowerCase();
+    
+    // Validar extensión del archivo antes de procesar
+    const fileExtension = this.getFileExtension(normalizedFileName);
+    
+    // Rechazar explícitamente extensiones no soportadas
+    if (this.unsupportedExtensions.includes(fileExtension)) {
+      throw new Error(`Formato de archivo no soportado: ${fileExtension.toUpperCase()}. Los archivos de este tipo no pueden ser vectorizados.`);
+    }
+    
+    // Verificar si la extensión está en la lista de soportadas
+    const isSupportedExtension = this.supportedExtensions.some(ext => normalizedFileName.endsWith(ext));
+    
     const detected = await this.detectFileType(buffer);
     const combinedMimeType = `${normalizedMimeType} ${detected.mimeType || ''}`.trim();
     const combinedFileName = `${normalizedFileName}${detected.extensionSuffix || ''}`;
@@ -87,10 +113,26 @@ export class TextExtractionService {
     }
 
     if (this.looksLikePlainText(buffer)) {
-      return this.extractFromText(buffer);
+      // Solo permitir texto plano si la extensión está soportada o es .txt explícitamente
+      if (isSupportedExtension || fileExtension === '.txt') {
+        return this.extractFromText(buffer);
+      }
+    }
+
+    // Si llegamos aquí y la extensión no está soportada, rechazar
+    if (!isSupportedExtension) {
+      throw new Error(`Formato de archivo no soportado: ${fileExtension.toUpperCase()} (${fileName}). Formatos soportados: ${this.supportedExtensions.join(', ')}`);
     }
 
     throw new Error(`Formato de archivo no soportado: ${mimeType} (${fileName})`);
+  }
+
+  private getFileExtension(fileName: string): string {
+    const lastDot = fileName.lastIndexOf('.');
+    if (lastDot === -1 || lastDot === fileName.length - 1) {
+      return '';
+    }
+    return fileName.substring(lastDot).toLowerCase();
   }
 
   private async extractFromPdf(buffer: Buffer): Promise<ExtractionResult> {
